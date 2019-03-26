@@ -8,12 +8,9 @@
 #include <string.h>
 #include <string>
 #include <vector>
-#define Goss_TYPE 0x0202
+#define Goss_TYPE 514         // 0x0202
 class Gossiper;
-// функция для проверки МАС адреса и типа пакетов
 // функция формирования пакетов
-
-// получить пакет родителем, отправить информацию о новом получателе
 
 using namespace std;
 
@@ -42,18 +39,21 @@ void handle_ethernet(const u_char* packet)
 class Gossiper
 {
   private:
+    const int N = 2;                    // задержка в секундах
+    const int TTL = 4;                  // количество получателей
     char errbuf[PCAP_ERRBUF_SIZE];      // буфер ошибок
     pcap_t *handle;                     // идентификатор устройства
-    vector <uint8_t*> Goss_list;      // буфер MAC адресов
+    vector <uint8_t*> Goss_list;        // буфер MAC адресов
     uint8_t PersonalMAC[6];
     uint8_t MulticastMAC[6] = {1, 0, 94, 0, 0, 48};
+    u_char* CopyPacket(const u_char*, u_char*, int, bool*);
     void AddInList(u_char*);
-    void SendPacket(u_char*);
+    void SendPacket(const u_char*, int);
   public:
     Gossiper();
     void Hear();
     bool CompareMAC(uint8_t*, uint8_t*);
-    bool FilterMAC(struct ether_header*);
+    void FilterMAC(const u_char*, int);
 };
 
 Gossiper::Gossiper()
@@ -67,7 +67,7 @@ Gossiper::Gossiper()
   }
   printf("Device: %s\n", dev);
 
-  cout << "Open session" << endl;
+  cout << "Open session..." << endl;
   handle = pcap_open_live(dev, BUFSIZ, 0, -1, errbuf);    // открываем сессию для прослушивания устройства
   if (handle == NULL) {
     printf("Error opening! %s\n", errbuf);
@@ -92,6 +92,44 @@ Gossiper::Gossiper()
 
   for (int i = 0; i < 6; i++)
     PersonalMAC[i] = (uint8_t) ifr.ifr_hwaddr.sa_data[i];
+
+  cout << "Start listening..." << endl;
+}
+
+u_char* Gossiper::CopyPacket(const u_char *packet, u_char* dest, int len, bool *f)
+{
+  u_char *mess = new u_char[len];
+
+  for (int i = 0; i < len; i++)
+    if (i < 5)
+      mess[i] = dest[i];
+    else{
+      if (i == 14){
+        if ((u_short)packet[i] == 0){
+          f = new bool(false);
+          return mess;
+        }
+        mess[i] = (u_short)packet[i] - 1;
+      }else
+        mess[i] = packet[i];
+    }
+  return mess;
+}
+
+void Gossiper::SendPacket(const u_char *packet, int len)
+{
+  bool *f = new bool(true);
+  struct ether_header *eth;
+  eth = (struct ether_header *) packet;
+
+  for (int i = 0; i < Goss_list.size(); i++){
+    if(CompareMAC(Goss_list[i], eth->ether_dhost))
+      continue;
+    const u_char *out = CopyPacket(packet, Goss_list[i], len, f);
+    if (!*f)
+      return;
+    pcap_sendpacket(handle, out, len);
+  }
 }
 
 void Gossiper::AddInList(u_char *mac)
@@ -110,21 +148,25 @@ bool Gossiper::CompareMAC(uint8_t *first, uint8_t *second)
   return true;
 }
 
-bool Gossiper::FilterMAC(struct ether_header *eth)
-{
-  if (CompareMAC(eth->ether_dhost, MulticastMAC)){
-    cout << "s";
-  }
-  cout << "Filter" << endl;
-  return true;
-}
-
-static void Callback(u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *packet) // обработка приходящего пакета
+void Gossiper::FilterMAC(const u_char *packet, int len)
 {
   struct ether_header *eth;
   eth = (struct ether_header *) packet;
 
-  Goss->FilterMAC(eth);
+  if (eth->ether_type != Goss_TYPE)
+    return;
+
+  if (CompareMAC(eth->ether_dhost, MulticastMAC))
+    AddInList(eth->ether_shost);
+
+  if (CompareMAC(eth->ether_dhost, PersonalMAC))
+    if (packet[15] != 0)
+      SendPacket(packet, len);
+}
+
+static void Callback(u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *packet) // обработка приходящего пакета
+{
+  Goss->FilterMAC(packet, pkthdr->caplen);
 }
 
 void Gossiper::Hear()
