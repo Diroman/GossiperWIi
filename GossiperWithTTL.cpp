@@ -13,9 +13,6 @@
 #define Goss_TYPE 514         // 0x0202
 class Gossiper;
 
-// функция формирования пакетов
-// функция формирования запроса на добавление (при запуске программы)
-
 using namespace std;
 
 Gossiper *Goss;
@@ -30,7 +27,7 @@ class Gossiper
     vector <uint8_t*> Goss_list;        // буфер MAC адресов
     uint8_t PersonalMAC[6];
     uint8_t MulticastMAC[6] = {1, 0, 94, 0, 0, 48};
-    u_char* CopyPacket(const u_char*, u_char*, int, bool*);
+    u_char* CopyPacket(const u_char*, u_char*, int);
     void AddInList(u_char*);
     void NewPacket();
     void SendPacket(const u_char*, int);
@@ -80,7 +77,7 @@ Gossiper::Gossiper()
     PersonalMAC[i] = (uint8_t) ifr.ifr_hwaddr.sa_data[i];
 }
 
-u_char* Gossiper::CopyPacket(const u_char *packet, u_char* dest, int len, bool *f)
+u_char* Gossiper::CopyPacket(const u_char *packet, u_char* dest, int len)
 {
   u_char *mess = new u_char[len];
 
@@ -88,13 +85,9 @@ u_char* Gossiper::CopyPacket(const u_char *packet, u_char* dest, int len, bool *
     if (i < 5)
       mess[i] = dest[i];
     else{
-      if (i == 14){
-        if ((u_short)packet[i] == 0){
-          f = new bool(false);
-          return mess;
-        }
+      if (i == 14)
         mess[i] = (u_short)packet[i] - 1;
-      }else
+      else
         mess[i] = packet[i];
     }
   return mess;
@@ -105,7 +98,6 @@ void Gossiper::SendPacket(const u_char *packet, int len)
   if (!Goss_list.size())
     return;
 
-  bool *f = new bool(true);
   struct ether_header *eth = (struct ether_header *) packet;
 
   int num_dest = N > Goss_list.size() ? Goss_list.size() : N;
@@ -115,10 +107,8 @@ void Gossiper::SendPacket(const u_char *packet, int len)
     if(CompareMAC(Goss_list[i], eth->ether_dhost))
       continue;
 
-    const u_char *out = CopyPacket(packet, Goss_list[i], len, f);
+    const u_char *out = CopyPacket(packet, Goss_list[i], len);
 
-    if (!*f)
-      return;
     cout << "Send message." << endl;
     pcap_sendpacket(handle, out, len);
   }
@@ -152,7 +142,7 @@ void Gossiper::FilterMAC(const u_char *packet, int len)
     AddInList(eth->ether_shost);
 
   if (CompareMAC(eth->ether_dhost, PersonalMAC))
-    if (packet[15] != 0)
+    if (packet[14] != 0)
       SendPacket(packet, len);
 }
 
@@ -168,7 +158,7 @@ void Gossiper::NewPacket()
     if(i == 12 || i == 13)
       packet[i] = 2;
     if(i == 14)
-      packet[i] = 4;
+      packet[i] = TTL;
     if(i > 14)
       packet[i] = rand()%5;
   }
