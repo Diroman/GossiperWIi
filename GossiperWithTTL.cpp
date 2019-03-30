@@ -13,6 +13,8 @@
 #define Goss_TYPE 514         // 0x0202
 class Gossiper;
 
+// разбить на потоки
+// неправильно сохраняется МАС
 using namespace std;
 
 Gossiper *Goss;
@@ -26,7 +28,7 @@ class Gossiper
     pcap_t *handle;                     // идентификатор устройства
     vector <uint8_t*> Goss_list;        // буфер MAC адресов
     uint8_t PersonalMAC[6];
-    uint8_t MulticastMAC[6] = {1, 0, 94, 0, 0, 48};
+    uint8_t MulticastMAC[6] = {0x01, 0x00, 0x5E, 0x00, 0x00, 0x30};
     u_char* CopyPacket(const u_char*, u_char*, int);
     void AddInList(u_char*);
     void NewPacket();
@@ -68,6 +70,7 @@ Gossiper::Gossiper()
   memset(&ifr, 0, sizeof(ifr));
   strcpy(ifr.ifr_name, dev);
 
+
   if (ioctl(s, SIOCGIFHWADDR, ifr) == -1){
     cout << "Error while getting MAC!" << endl;
     throw;
@@ -95,8 +98,10 @@ u_char* Gossiper::CopyPacket(const u_char *packet, u_char* dest, int len)
 
 void Gossiper::SendPacket(const u_char *packet, int len)
 {
-  if (!Goss_list.size())
+  if (!Goss_list.size()){
+    cout << "Empty" << endl;
     return;
+    }
 
   struct ether_header *eth = (struct ether_header *) packet;
 
@@ -107,7 +112,7 @@ void Gossiper::SendPacket(const u_char *packet, int len)
     if(CompareMAC(Goss_list[i], eth->ether_dhost))
       continue;
 
-    const u_char *out = CopyPacket(packet, Goss_list[i], len);
+    const u_char *out = CopyPacket(packet, Goss_list[0], len);
 
     cout << "Send message." << endl;
     pcap_sendpacket(handle, out, len);
@@ -116,6 +121,7 @@ void Gossiper::SendPacket(const u_char *packet, int len)
 
 void Gossiper::AddInList(u_char *mac)
 {
+  cout << "Add in list" << endl;
   uint8_t insert[6];
   for (int i = 0; i < 6; i++)
     insert[i] = reinterpret_cast<uint8_t>(mac[i]);
@@ -133,10 +139,7 @@ bool Gossiper::CompareMAC(uint8_t *first, uint8_t *second)
 void Gossiper::FilterMAC(const u_char *packet, int len)
 {
   struct ether_header *eth;
-  eth = (struct ether_header *) (packet + 14);
-
-  if (eth->ether_type != Goss_TYPE)
-    return;
+  eth = (struct ether_header *) (packet);
 
   if (CompareMAC(eth->ether_dhost, MulticastMAC))
     AddInList(eth->ether_shost);
@@ -162,6 +165,7 @@ void Gossiper::NewPacket()
     if(i > 14)
       packet[i] = rand()%5;
   }
+
   cout << "Send message." << endl;
   SendPacket(packet, 64);
 }
@@ -178,8 +182,8 @@ void Gossiper::SendStartPacker()
     if(i == 12 || i == 13)
       packet[i] = 2;
     if(i == 14)
-      packet[i] = 4;
-    if(i > 14)
+      packet[i] = 4;   // можно удалить
+     if(i > 14)
       packet[i] = rand()%5;
   }
   cout << "Send start message..." << endl;
@@ -189,6 +193,7 @@ void Gossiper::SendStartPacker()
 static void Callback(u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *packet) // обработка приходящего пакета
 {
   Goss->FilterMAC(packet, pkthdr->caplen);
+
 }
 
 void Gossiper::Hear()
@@ -198,7 +203,7 @@ void Gossiper::Hear()
 
   while(true){
     pcap_loop(handle, 1, Callback, NULL); // функция-цикл для последовательной обработки сообщений
-    if((clock() - timer)/CLOCKS_PER_SEC > 3){
+    if((clock() - timer)/CLOCKS_PER_SEC > 1){
       timer = clock();
       NewPacket();
     }
