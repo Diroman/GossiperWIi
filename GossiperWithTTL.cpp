@@ -112,7 +112,7 @@ void Gossiper::SendPacket(const u_char *packet, int len)
     if(CompareMAC(Goss_list[i], eth->ether_dhost))
       continue;
 
-    const u_char *out = CopyPacket(packet, Goss_list[0], len);
+    const u_char *out = CopyPacket(packet, Goss_list[i], len);
 
     cout << "Send message." << endl;
     pcap_sendpacket(handle, out, len);
@@ -154,8 +154,6 @@ void Gossiper::NewPacket()
   uint8_t packet[64];
 
   for (int i = 0; i < 64; i++){
-    if(i < 6)
-      packet[i] = MulticastMAC[i];
     if(i > 5 && i < 12)
       packet[i] = PersonalMAC[i - 6];
     if(i == 12 || i == 13)
@@ -193,7 +191,6 @@ void Gossiper::SendStartPacker()
 static void Callback(u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *packet) // обработка приходящего пакета
 {
   Goss->FilterMAC(packet, pkthdr->caplen);
-
 }
 
 void Gossiper::Hear()
